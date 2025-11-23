@@ -4,8 +4,9 @@
 #
 # This script downloads the latest PC/GEOS Ensemble build together with the
 # matching Basebox DOSBox Staging fork, prepares a runnable environment under
-# "$HOME/geospc", and provides an Ensemble launcher within that directory that
-# boots Ensemble inside Basebox. Each run creates a fresh install.
+# a user-specified install directory, and provides an Ensemble launcher within
+# that directory that boots Ensemble inside Basebox. Each run creates a fresh
+# install.
 #
 # Supported environments: Debian, Fedora, and Windows Subsystem for Linux.
 # The script relies only on standard Unix tooling available on these
@@ -19,14 +20,6 @@ set -euo pipefail
 
 GEOS_RELEASE_URL="https://github.com/bluewaysw/pcgeos/releases/download/CI-latest-issue-829/pcgeos-ensemble_nc.zip"
 BASEBOX_RELEASE_URL="https://github.com/bluewaysw/pcgeos-basebox/releases/download/CI-latest-issue-13/pcgeos-basebox.zip"
-INSTALL_ROOT="${HOME}/geosalpha"
-
-DRIVEC_DIR="${INSTALL_ROOT}/drivec"
-GEOS_INSTALL_DIR="${DRIVEC_DIR}/ensemble"
-GEOS_ARCHIVE_ROOT="ensemble"
-BASEBOX_DIR="${INSTALL_ROOT}/basebox"
-BASEBOX_BASE_CONFIG="${BASEBOX_DIR}/basebox-geos.conf"
-LOCAL_LAUNCHER="${INSTALL_ROOT}/ensemble.sh"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOCAL_USER_CONFIG_SOURCE="${SCRIPT_DIR}/basebox.conf"
@@ -45,6 +38,12 @@ log()
 fail()
 {
     printf 'Error: %s\n' "$*" >&2
+    exit 1
+}
+
+usage()
+{
+    printf 'Usage: %s <install-root>\n' "$(basename "$0")" >&2
     exit 1
 }
 
@@ -77,6 +76,20 @@ absolute_path()
 {
     local target="$1"
     ( cd "$target" >/dev/null 2>&1 && pwd )
+}
+
+resolve_install_root()
+{
+    local root="$1"
+
+    case "${root}" in
+        /*)
+            printf '%s\n' "${root}"
+            ;;
+        *)
+            printf '%s/%s\n' "${HOME}" "${root}"
+            ;;
+    esac
 }
 
 # Detect the best Basebox executable for the current host.
@@ -144,6 +157,19 @@ resolve_geos_archive_root()
 
     printf '%s\n' ''
 }
+
+if [ "$#" -lt 1 ]; then
+    usage
+fi
+
+INSTALL_ROOT="$(resolve_install_root "$1")"
+
+DRIVEC_DIR="${INSTALL_ROOT}/drivec"
+GEOS_INSTALL_DIR="${DRIVEC_DIR}/ensemble"
+GEOS_ARCHIVE_ROOT="ensemble"
+BASEBOX_DIR="${INSTALL_ROOT}/basebox"
+BASEBOX_BASE_CONFIG="${BASEBOX_DIR}/basebox-geos.conf"
+LOCAL_LAUNCHER="${INSTALL_ROOT}/ensemble.sh"
 
 # -----------------------------------------------------------------------------
 # Installation steps
