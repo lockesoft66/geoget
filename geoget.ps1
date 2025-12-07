@@ -250,10 +250,16 @@ function Create-BaseboxConfig {
     $previousSdlAudio = $env:SDL_AUDIODRIVER
     $env:XDG_CONFIG_HOME = $xdgConfig
     try {
-        $printConf = & $baseboxExe --printconf 2>$null
+        $printConf = & $baseboxExe --printconf 2>&1
+        $printConfExitCode = $LASTEXITCODE
         $configLine = ($printConf | Where-Object { $_ -match '\S' } | Select-Object -Last 1)
         if (-not $configLine) {
-            Fail 'Failed to determine the Basebox configuration path via --printconf.'
+            $outputText = ($printConf -join "`n")
+            if ($printConfExitCode -ne 0) {
+                Fail "Failed to determine the Basebox configuration path via --printconf (exit code $printConfExitCode). Output:`n$outputText"
+            }
+
+            Fail "Failed to determine the Basebox configuration path via --printconf. Output:`n$outputText"
         }
 
         $configLine = $configLine.TrimEnd("`r")
