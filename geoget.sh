@@ -23,6 +23,7 @@ BASEBOX_RELEASE_URL="https://github.com/bluewaysw/pcgeos-basebox/releases/downlo
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOCAL_USER_CONFIG_SOURCE="${SCRIPT_DIR}/basebox.conf"
+LOCAL_LAUNCHER_TEMPL="${SCRIPT_DIR}/ensemble.sh"
 
 DETECTED_BASEBOX_BINARY=""
 
@@ -253,109 +254,6 @@ extract_archives()
     fi
 }
 
-create_basebox_config()
-{
-    local drivec_abs_path basebox_binary_rel basebox_binary xdg_root config_output config_line config_path config_dir tmp_conf autoexec_file
-
-    drivec_abs_path="$(absolute_path "${DRIVEC_DIR}")"
-
-    basebox_binary_rel="${DETECTED_BASEBOX_BINARY}"
-    if [ -z "${basebox_binary_rel}" ]; then
-        basebox_binary_rel="$(detect_basebox_binary)"
-    fi
-
-    if [ -z "${basebox_binary_rel}" ]; then
-        fail "Unable to locate the Basebox executable for configuration generation."
-    fi
-
-    basebox_binary="${BASEBOX_DIR}/${basebox_binary_rel}"
-
-    log "Generating Basebox configuration from ${basebox_binary_rel}"
-
-    xdg_root="$(mktemp -d)"
-    mkdir -p "${xdg_root}/config"
-
-    config_output="$(XDG_CONFIG_HOME="${xdg_root}/config" "${basebox_binary}" --printconf 2>/dev/null || true)"
-    config_line="$(printf '%s\n' "${config_output}" | awk 'NF { last=$0 } END { print last }')"
-    config_line="${config_line%$'\r'}"
-
-    if [ -z "${config_line}" ]; then
-        rm -rf "${xdg_root}"
-        fail "Failed to determine the Basebox configuration path via --printconf."
-    fi
-
-    if [[ "${config_line}" == *:* ]]; then
-        config_path="${config_line##*:}"
-    else
-        config_path="${config_line}"
-    fi
-
-    config_path="$(printf '%s' "${config_path}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-
-    if [ -z "${config_path}" ]; then
-        rm -rf "${xdg_root}"
-        fail "Unable to parse the Basebox configuration path from --printconf output."
-    fi
-
-    config_dir="$(dirname "${config_path}")"
-    mkdir -p "${config_dir}"
-    rm -f "${config_path}"
-
-    local generated_config="false"
-
-    if [ -z "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ]; then
-        if SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy \
-            XDG_CONFIG_HOME="${xdg_root}/config" "${basebox_binary}" -c exit >/dev/null 2>&1; then
-            generated_config="true"
-        else
-            log "Warning: Basebox failed with SDL_VIDEODRIVER=dummy, retrying with host display"
-        fi
-    fi
-
-    if [ "${generated_config}" != "true" ]; then
-        if ! XDG_CONFIG_HOME="${xdg_root}/config" "${basebox_binary}" -c exit >/dev/null 2>&1; then
-            rm -rf "${xdg_root}"
-            fail "Basebox failed to generate its default configuration."
-        fi
-    fi
-
-    if [ ! -f "${config_path}" ]; then
-        rm -rf "${xdg_root}"
-        fail "Basebox did not create a configuration file at ${config_path}."
-    fi
-
-    tmp_conf="$(mktemp)"
-    cp "${config_path}" "${tmp_conf}"
-
-    autoexec_file="$(mktemp)"
-    printf '%s\n' \
-        "@echo off" \
-        "mount c \"${drivec_abs_path}\" -t dir" \
-        "c:" \
-        "cd ensemble" \
-        "loader" \
-        "exit" >"${autoexec_file}"
-
-    sed -n "
-/^[[:space:]]*\[autoexec\][[:space:]]*\$/I{
-    p
-    r ${autoexec_file}
-    n
-    :skip
-    /^[[:space:]]*\[/I{
-        p
-        b
-    }
-    n
-    b skip
-}
-p
-" "${tmp_conf}" >"${BASEBOX_BASE_CONFIG}"
-
-    rm -f "${tmp_conf}" "${autoexec_file}"
-    rm -rf "${xdg_root}"
-}
-
 copy_local_user_config()
 {
     local source dest
@@ -366,54 +264,21 @@ copy_local_user_config()
     if [ -f "${source}" ]; then
         log "Copying local Basebox user config from ${source}"
         cp -f "${source}" "${dest}"
+
+        log "Patching ${dest}"
+        sed -i "s|{{TAG}}|$DRIVEC_DIR|g" "${dest}"
     fi
 }
 
 create_launcher()
 {
     log "Creating Ensemble launcher at ${LOCAL_LAUNCHER}"
-    cat >"${LOCAL_LAUNCHER}" <<'LAUNCH'
-#!/usr/bin/env bash
-set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BASEBOX_DIR="${SCRIPT_DIR}/basebox"
-
-select_basebox_binary()
-{
-    local candidate
-    if [ -x "${BASEBOX_DIR}/binl64/basebox" ]; then
-        candidate="${BASEBOX_DIR}/binl64/basebox"
-    elif [ -x "${BASEBOX_DIR}/binl/basebox" ]; then
-        candidate="${BASEBOX_DIR}/binl/basebox"
-    elif [ -x "${BASEBOX_DIR}/binmac/basebox" ]; then
-        candidate="${BASEBOX_DIR}/binmac/basebox"
-    elif [ -x "${BASEBOX_DIR}/binnt/basebox.exe" ]; then
-        candidate="${BASEBOX_DIR}/binnt/basebox.exe"
-    else
-        candidate=""
+    if [ -f "${LOCAL_LAUNCHER_TEMPL}" ]; then
+        log "Creating Ensemble launcher at ${LOCAL_LAUNCHER}"
+        cp -f "${LOCAL_LAUNCHER_TEMPL}" "${LOCAL_LAUNCHER}"
+        chmod +x "${LOCAL_LAUNCHER}"
     fi
-
-    if [ -z "$candidate" ]; then
-        printf 'Error: Unable to locate the Basebox executable.\n' >&2
-        exit 1
-    fi
-
-    printf '%s' "$candidate"
-}
-
-BASEBOX_EXEC="$(select_basebox_binary)"
-BASE_CONFIG_FILE="${BASEBOX_DIR}/basebox-geos.conf"
-USER_CONFIG_FILE="${BASEBOX_DIR}/basebox.conf"
-
-if [ ! -f "$BASE_CONFIG_FILE" ]; then
-    printf 'Error: Missing Basebox configuration at %s\n' "$BASE_CONFIG_FILE" >&2
-    exit 1
-fi
-
-exec "$BASEBOX_EXEC" -conf "$BASE_CONFIG_FILE" -conf "$USER_CONFIG_FILE" "$@"
-LAUNCH
-    chmod +x "${LOCAL_LAUNCHER}"
 }
 
 main()
@@ -421,7 +286,6 @@ main()
     prepare_environment
     extract_archives
     copy_local_user_config
-    create_basebox_config
     create_launcher
 
     log "Deployment complete."
