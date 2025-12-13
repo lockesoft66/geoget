@@ -3,9 +3,9 @@
 
     This script mirrors geoget.sh and prepares a runnable PC/GEOS Ensemble
     environment using the Basebox DOSBox-Staging fork on Windows. It downloads
-    the latest builds, installs them under a chosen install root, generates a
-    Basebox configuration that mounts the Ensemble files, and creates an
-    ensemble.cmd launcher.
+    the latest builds, installs them under a chosen install root, copies a
+    template Basebox configuration that mounts the Ensemble files, and creates
+    ensemble launchers.
 
     standing in the geoget folder, use it from a classic cmd.exe window like this:
     .\geoget.cmd geosbbx2
@@ -25,7 +25,8 @@ $GEOS_RELEASE_URL = "https://github.com/bluewaysw/pcgeos/releases/download/CI-la
 $BASEBOX_RELEASE_URL = "https://github.com/bluewaysw/pcgeos-basebox/releases/download/CI-latest-issue-13/pcgeos-basebox.zip"
 
 $ScriptDir = Split-Path -Parent -Path $MyInvocation.MyCommand.Definition
-$LocalUserConfigSource = Join-Path $ScriptDir 'basebox.conf'
+$LocalUserConfigSource = Join-Path $ScriptDir 'templ/basebox.conf'
+$LocalLauncherTemplate = Join-Path $ScriptDir 'templ/ensemble.sh'
 
 $GeosArchiveRootName = 'ensemble'
 
@@ -162,7 +163,6 @@ $InstallRoot = Resolve-InstallRoot -Root $args[0]
 $DriveCDir = Join-Path $InstallRoot 'drivec'
 $GeosInstallDir = Join-Path $DriveCDir 'ensemble'
 $BaseboxDir = Join-Path $InstallRoot 'basebox'
-$BaseboxBaseConfig = Join-Path $BaseboxDir 'basebox-geos.conf'
 $LocalLauncherCmd = Join-Path $InstallRoot 'ensemble.cmd'
 $LocalLauncherSh = Join-Path $InstallRoot 'ensemble.sh'
 
@@ -228,6 +228,11 @@ function Extract-Archives {
                 Write-Log 'Warning: chmod not available; skipping executable bit adjustments.'
             }
         }
+
+        $detected = Select-BaseboxBinary -BaseboxRoot $BaseboxDir
+        if (-not $detected) {
+            Fail "Unable to locate the Basebox executable inside $BaseboxDir"
+        }
     }
     finally {
         if (Test-Path -Path $tempDir) {
@@ -236,162 +241,19 @@ function Extract-Archives {
     }
 }
 
-function Create-BaseboxConfig {
-    $baseboxExe = Select-BaseboxBinary -BaseboxRoot $BaseboxDir
-    if (-not $baseboxExe) {
-        Fail "Unable to locate the Basebox executable inside $BaseboxDir"
-    }
-
-    $runtimeInfo = [System.Runtime.InteropServices.RuntimeInformation]
-    $isWindowsPlatform = $runtimeInfo::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)
-
-    Write-Log "Generating Basebox configuration using $(Split-Path -Path $baseboxExe -Leaf)"
-
-    $xdgRoot = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName())
-    New-Item -ItemType Directory -Path $xdgRoot -Force | Out-Null
-    $xdgConfig = Join-Path $xdgRoot 'config'
-    New-Item -ItemType Directory -Path $xdgConfig -Force | Out-Null
-
-    $previousXdg = $env:XDG_CONFIG_HOME
-    $previousSdlVideo = $env:SDL_VIDEODRIVER
-    $previousSdlAudio = $env:SDL_AUDIODRIVER
-    $env:XDG_CONFIG_HOME = $xdgConfig
-    try {
-        $printConf = & $baseboxExe --printconf 2>&1
-        $printConfExitCode = $LASTEXITCODE
-        $configLine = ($printConf | Where-Object { $_ -match '\S' } | Select-Object -Last 1)
-        if (-not $configLine) {
-            $outputText = ($printConf -join "`n")
-            if ($printConfExitCode -ne 0) {
-                Fail "Failed to determine the Basebox configuration path via --printconf (exit code $printConfExitCode). Output:`n$outputText"
-            }
-
-            Fail "Failed to determine the Basebox configuration path via --printconf. Output:`n$outputText"
-        }
-
-        $configLine = $configLine.TrimEnd("`r")
-        if ($configLine -match ':') {
-            $configPath = ($configLine -split ':', 2)[1].Trim()
-        }
-        else {
-            $configPath = $configLine.Trim()
-        }
-
-        if (-not $configPath) {
-            Fail 'Unable to parse the Basebox configuration path from --printconf output.'
-        }
-
-        $configDir = Split-Path -Parent -Path $configPath
-        New-Item -ItemType Directory -Path $configDir -Force | Out-Null
-        if (Test-Path -Path $configPath) {
-            Remove-Item -Path $configPath -Force
-        }
-
-        $configGenerated = $false
-        $shouldUseDummyDrivers = (-not $isWindowsPlatform) -and (-not $env:DISPLAY) -and (-not $env:WAYLAND_DISPLAY)
-
-        if ($shouldUseDummyDrivers) {
-            $env:SDL_VIDEODRIVER = 'dummy'
-            $env:SDL_AUDIODRIVER = 'dummy'
-            try {
-                & $baseboxExe -c exit *> $null
-                $configGenerated = $true
-            }
-            catch {
-                Write-Log 'Warning: Basebox failed with SDL dummy drivers, retrying with host display.'
-            }
-            finally {
-                if ($null -ne $previousSdlVideo) {
-                    $env:SDL_VIDEODRIVER = $previousSdlVideo
-                }
-                else {
-                    Remove-Item Env:SDL_VIDEODRIVER -ErrorAction SilentlyContinue
-                }
-
-                if ($null -ne $previousSdlAudio) {
-                    $env:SDL_AUDIODRIVER = $previousSdlAudio
-                }
-                else {
-                    Remove-Item Env:SDL_AUDIODRIVER -ErrorAction SilentlyContinue
-                }
-            }
-        }
-
-        if (-not $configGenerated) {
-            try {
-                & $baseboxExe -c exit *> $null
-            }
-            catch {
-                Fail 'Basebox failed to generate its default configuration.'
-            }
-        }
-
-        if (-not (Test-Path -Path $configPath -PathType Leaf)) {
-            Fail "Basebox did not create a configuration file at $configPath."
-        }
-
-        $configLines = Get-Content -Path $configPath -ErrorAction Stop
-        $drivecPath = [System.IO.Path]::GetFullPath($DriveCDir)
-        $autoexecBlock = @(
-            '@echo off'
-            "mount c `"$drivecPath`" -t dir"
-            'c:'
-            'cd ensemble'
-            'loader'
-            'exit'
-        )
-
-
-        $outputLines = New-Object System.Collections.Generic.List[string]
-        $inAutoexec = $false
-        $autoexecInserted = $false
-
-        foreach ($line in $configLines) {
-            $trimmed = $line.Trim()
-            if ($trimmed -match '^\[autoexec\]\s*$') {
-                $outputLines.Add($line)
-                foreach ($autoLine in $autoexecBlock) {
-                    $outputLines.Add($autoLine)
-                }
-                $inAutoexec = $true
-                $autoexecInserted = $true
-                continue
-            }
-
-            if ($inAutoexec) {
-                if ($trimmed -match '^\[') {
-                    $outputLines.Add($line)
-                    $inAutoexec = $false
-                }
-                continue
-            }
-
-            $outputLines.Add($line)
-        }
-
-        if (-not $autoexecInserted) {
-            $outputLines.Add('[autoexec]')
-            foreach ($autoLine in $autoexecBlock) {
-                $outputLines.Add($autoLine)
-            }
-        }
-
-        Set-Content -Path $BaseboxBaseConfig -Value $outputLines -Encoding UTF8
-    }
-    finally {
-        $env:XDG_CONFIG_HOME = $previousXdg
-        if (Test-Path -Path $xdgRoot) {
-            Remove-Item -Path $xdgRoot -Recurse -Force
-        }
-    }
-}
-
 function Copy-LocalUserConfig {
     $destination = Join-Path $BaseboxDir 'basebox.conf'
-    if (Test-Path -Path $LocalUserConfigSource -PathType Leaf) {
-        Write-Log "Copying local Basebox user config from $LocalUserConfigSource"
-        Copy-Item -Path $LocalUserConfigSource -Destination $destination -Force
+    if (-not (Test-Path -Path $LocalUserConfigSource -PathType Leaf)) {
+        Write-Log "Warning: Local Basebox config template missing at $LocalUserConfigSource"
+        return
     }
+
+    Write-Log "Copying local Basebox user config from $LocalUserConfigSource"
+    Copy-Item -Path $LocalUserConfigSource -Destination $destination -Force
+
+    $drivecPath = [System.IO.Path]::GetFullPath($DriveCDir)
+    (Get-Content -Path $destination -Raw) -replace '\{\{TAG\}\}', $drivecPath |
+        Set-Content -Path $destination -Encoding ASCII
 }
 
 function Create-Launcher {
@@ -402,68 +264,32 @@ function Create-Launcher {
 setlocal
 set SCRIPT_DIR=%~dp0
 set BASEBOX_DIR=%SCRIPT_DIR%basebox
-set BASEBOX_EXEC=%BASEBOX_DIR%\binnt\basebox.exe
-set BASE_CONFIG_FILE=%BASEBOX_DIR%\basebox-geos.conf
 set USER_CONFIG_FILE=%BASEBOX_DIR%\basebox.conf
 
-if not exist "%BASEBOX_EXEC%" (
-    echo Error: Unable to locate the Basebox executable at %BASEBOX_EXEC%.
+if exist "%BASEBOX_DIR%\binnt\basebox.exe" (
+    set BASEBOX_EXEC=%BASEBOX_DIR%\binnt\basebox.exe
+) else if exist "%BASEBOX_DIR%\binl64\basebox" (
+    set BASEBOX_EXEC=%BASEBOX_DIR%\binl64\basebox
+) else if exist "%BASEBOX_DIR%\binl\basebox" (
+    set BASEBOX_EXEC=%BASEBOX_DIR%\binl\basebox
+) else if exist "%BASEBOX_DIR%\binmac\basebox" (
+    set BASEBOX_EXEC=%BASEBOX_DIR%\binmac\basebox
+) else (
+    echo Error: Unable to locate the Basebox executable.
     exit /b 1
 )
 
-if not exist "%BASE_CONFIG_FILE%" (
-    echo Error: Missing Basebox configuration at %BASE_CONFIG_FILE%.
-    exit /b 1
-)
-
-"%BASEBOX_EXEC%" -conf "%BASE_CONFIG_FILE%" -conf "%USER_CONFIG_FILE%" %*
+"%BASEBOX_EXEC%" -noprimaryconf -nolocalconf -conf "%USER_CONFIG_FILE%" %*
 '@
 
     Set-Content -Path $LocalLauncherCmd -Value $cmdLauncher -Encoding ASCII
 
-    $shLauncher = @'
-#!/usr/bin/env bash
-set -euo pipefail
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BASEBOX_DIR="${SCRIPT_DIR}/basebox"
-
-select_basebox_binary()
-{
-    local candidate
-    if [ -x "${BASEBOX_DIR}/binl64/basebox" ]; then
-        candidate="${BASEBOX_DIR}/binl64/basebox"
-    elif [ -x "${BASEBOX_DIR}/binl/basebox" ]; then
-        candidate="${BASEBOX_DIR}/binl/basebox"
-    elif [ -x "${BASEBOX_DIR}/binmac/basebox" ]; then
-        candidate="${BASEBOX_DIR}/binmac/basebox"
-    elif [ -x "${BASEBOX_DIR}/binnt/basebox.exe" ]; then
-        candidate="${BASEBOX_DIR}/binnt/basebox.exe"
-    else
-        candidate=""
-    fi
-
-    if [ -z "$candidate" ]; then
-        printf 'Error: Unable to locate the Basebox executable.\n' >&2
-        exit 1
-    fi
-
-    printf '%s' "$candidate"
-}
-
-BASEBOX_EXEC="$(select_basebox_binary)"
-BASE_CONFIG_FILE="${BASEBOX_DIR}/basebox-geos.conf"
-USER_CONFIG_FILE="${BASEBOX_DIR}/basebox.conf"
-
-if [ ! -f "$BASE_CONFIG_FILE" ]; then
-    printf 'Error: Missing Basebox configuration at %s\n' "$BASE_CONFIG_FILE" >&2
-    exit 1
-fi
-
-exec "$BASEBOX_EXEC" -conf "$BASE_CONFIG_FILE" -conf "$USER_CONFIG_FILE" "$@"
-'@
-
-    Set-Content -Path $LocalLauncherSh -Value $shLauncher -Encoding ASCII
+    if (Test-Path -Path $LocalLauncherTemplate -PathType Leaf) {
+        Copy-Item -Path $LocalLauncherTemplate -Destination $LocalLauncherSh -Force
+    }
+    else {
+        Write-Log "Warning: Launcher template missing at $LocalLauncherTemplate"
+    }
 
     if (Get-Command -Name 'chmod' -ErrorAction SilentlyContinue) {
         try {
@@ -482,7 +308,6 @@ function Main {
     Prepare-Environment
     Extract-Archives
     Copy-LocalUserConfig
-    Create-BaseboxConfig
     Create-Launcher
 
     Write-Log 'Deployment complete.'
