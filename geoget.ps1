@@ -26,7 +26,8 @@ $BASEBOX_RELEASE_URL = "https://github.com/bluewaysw/pcgeos-basebox/releases/dow
 
 $ScriptDir = Split-Path -Parent -Path $MyInvocation.MyCommand.Definition
 $LocalUserConfigSource = Join-Path $ScriptDir 'templ/basebox.conf'
-$LocalLauncherTemplate = Join-Path $ScriptDir 'templ/ensemble.sh'
+$LocalLauncherCmdTemplate = Join-Path $ScriptDir 'templ/ensemble.cmd'
+$LocalLauncherShTemplate = Join-Path $ScriptDir 'templ/ensemble.sh'
 
 $GeosArchiveRootName = 'ensemble'
 
@@ -259,48 +260,33 @@ function Copy-LocalUserConfig {
 function Create-Launcher {
     Write-Log "Creating Ensemble launchers at $LocalLauncherCmd and $LocalLauncherSh"
 
-    $cmdLauncher = @'
-@echo off
-setlocal
-set SCRIPT_DIR=%~dp0
-set BASEBOX_DIR=%SCRIPT_DIR%basebox
-set USER_CONFIG_FILE=%BASEBOX_DIR%\basebox.conf
-
-if exist "%BASEBOX_DIR%\binnt\basebox.exe" (
-    set BASEBOX_EXEC=%BASEBOX_DIR%\binnt\basebox.exe
-) else if exist "%BASEBOX_DIR%\binl64\basebox" (
-    set BASEBOX_EXEC=%BASEBOX_DIR%\binl64\basebox
-) else if exist "%BASEBOX_DIR%\binl\basebox" (
-    set BASEBOX_EXEC=%BASEBOX_DIR%\binl\basebox
-) else if exist "%BASEBOX_DIR%\binmac\basebox" (
-    set BASEBOX_EXEC=%BASEBOX_DIR%\binmac\basebox
-) else (
-    echo Error: Unable to locate the Basebox executable.
-    exit /b 1
-)
-
-"%BASEBOX_EXEC%" -noprimaryconf -nolocalconf -conf "%USER_CONFIG_FILE%" %*
-'@
-
-    Set-Content -Path $LocalLauncherCmd -Value $cmdLauncher -Encoding ASCII
-
-    if (Test-Path -Path $LocalLauncherTemplate -PathType Leaf) {
-        Copy-Item -Path $LocalLauncherTemplate -Destination $LocalLauncherSh -Force
+    if (Test-Path -Path $LocalLauncherCmdTemplate -PathType Leaf) {
+        Copy-Item -Path $LocalLauncherCmdTemplate -Destination $LocalLauncherCmd -Force
     }
     else {
-        Write-Log "Warning: Launcher template missing at $LocalLauncherTemplate"
+        Write-Log "Warning: Launcher template missing at $LocalLauncherCmdTemplate"
     }
 
-    if (Get-Command -Name 'chmod' -ErrorAction SilentlyContinue) {
-        try {
-            & chmod +x -- $LocalLauncherSh
-        }
-        catch {
-            Write-Log "Warning: Failed to mark $LocalLauncherSh as executable: $($_.Exception.Message)"
-        }
+    if (Test-Path -Path $LocalLauncherShTemplate -PathType Leaf) {
+        Copy-Item -Path $LocalLauncherShTemplate -Destination $LocalLauncherSh -Force
     }
     else {
-        Write-Log 'Warning: chmod not available; launcher may not be executable.'
+        Write-Log "Warning: Launcher template missing at $LocalLauncherShTemplate"
+    }
+
+    $runtimeInfo = [System.Runtime.InteropServices.RuntimeInformation]
+    if (-not $runtimeInfo::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)) {
+        if (Get-Command -Name 'chmod' -ErrorAction SilentlyContinue) {
+            try {
+                & chmod +x -- $LocalLauncherSh
+            }
+            catch {
+                Write-Log "Warning: Failed to mark $LocalLauncherSh as executable: $($_.Exception.Message)"
+            }
+        }
+        else {
+            Write-Log 'Warning: chmod not available; launcher may not be executable.'
+        }
     }
 }
 
