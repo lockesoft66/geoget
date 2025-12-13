@@ -28,9 +28,14 @@ func downloadFile(url, destination string) error {
 	}
 	defer out.Close()
 
-	if _, err := io.Copy(out, resp.Body); err != nil {
+	progress := newProgressWriter(filepathBase(url), resp.ContentLength, os.Stdout)
+	reader := io.TeeReader(resp.Body, progress)
+
+	if _, err := io.Copy(out, reader); err != nil {
 		return fmt.Errorf("write download: %w", err)
 	}
+
+	progress.Finish()
 
 	return nil
 }
