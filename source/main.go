@@ -1,10 +1,14 @@
 package main
 
 import (
+	"bufio"
+	"errors"
+	"flag"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const (
@@ -14,13 +18,17 @@ const (
 )
 
 func main() {
-	installRoot := parseInstallRoot()
+	installRoot, force := parseInstallRootAndFlags()
 
 	baseboxDir := filepath.Join(installRoot, "basebox")
 	drivecDir := filepath.Join(installRoot, "drivec")
 	geosInstallDir := filepath.Join(drivecDir, geosArchiveRoot)
 
 	logger := log.New(os.Stdout, "[geoget] ", 0)
+
+	if err := prepareInstallRoot(installRoot, force); err != nil {
+		fatal(err)
+	}
 
 	if err := prepareInstallDirs(installRoot, geosInstallDir, baseboxDir); err != nil {
 		fatal(err)
@@ -95,15 +103,30 @@ func main() {
 	logger.Println("Deployment complete.")
 }
 
-func parseInstallRoot() string {
-	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: %s <install-root>\n", filepath.Base(os.Args[0]))
-		os.Exit(1)
+func parseInstallRootAndFlags() (string, bool) {
+	var force bool
+	var help bool
+
+	flag.BoolVar(&force, "force", false, "overwrite existing installation without prompt")
+	flag.BoolVar(&force, "f", false, "overwrite existing installation without prompt")
+	flag.BoolVar(&help, "help", false, "show this help message")
+	flag.BoolVar(&help, "h", false, "show this help message")
+
+	flag.Usage = printUsage
+	flag.Parse()
+
+	if help {
+		printUsage()
+		os.Exit(0)
 	}
 
-	root := os.Args[1]
+	root := "geospc"
+	if arg := flag.Arg(0); arg != "" {
+		root = arg
+	}
+
 	if filepath.IsAbs(root) {
-		return filepath.Clean(root)
+		return filepath.Clean(root), force
 	}
 
 	homeDir, err := os.UserHomeDir()
@@ -111,16 +134,49 @@ func parseInstallRoot() string {
 		fatal(fmt.Errorf("resolve home directory: %w", err))
 	}
 
-	return filepath.Join(homeDir, root)
+	return filepath.Join(homeDir, root), force
+}
+
+func printUsage() {
+	fmt.Fprintf(flag.CommandLine.Output(), "Usage: %s [options] [install_root]\n", filepath.Base(os.Args[0]))
+	fmt.Fprintln(flag.CommandLine.Output())
+	fmt.Fprintln(flag.CommandLine.Output(), "Options:")
+	fmt.Fprintln(flag.CommandLine.Output(), "  -f, --force   overwrite existing installation without prompt")
+	fmt.Fprintln(flag.CommandLine.Output(), "  -h, --help    show this help message")
+	fmt.Fprintln(flag.CommandLine.Output())
+	fmt.Fprintln(flag.CommandLine.Output(), "Arguments:")
+	fmt.Fprintln(flag.CommandLine.Output(), "  install_root  optional install root; defaults to geospc (absolute roots cleaned, relative roots resolved under home)")
+}
+
+func prepareInstallRoot(installRoot string, force bool) error {
+	if installRoot == "" || installRoot == "/" || installRoot == string(filepath.Separator) {
+		return fmt.Errorf("refusing to operate on empty install root")
+	}
+
+	if _, err := os.Stat(installRoot); err == nil {
+		if !force {
+			confirmed, confirmErr := confirmOverwrite()
+			if confirmErr != nil {
+				return confirmErr
+			}
+			if !confirmed {
+				return errors.New("installation aborted by user")
+			}
+		}
+
+		if err := os.RemoveAll(installRoot); err != nil {
+			return fmt.Errorf("remove existing install root: %w", err)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("check install root: %w", err)
+	}
+
+	return nil
 }
 
 func prepareInstallDirs(installRoot, geosInstallDir, baseboxDir string) error {
 	if installRoot == "" || installRoot == "/" || installRoot == string(filepath.Separator) {
 		return fmt.Errorf("refusing to operate on empty install root")
-	}
-
-	if err := os.RemoveAll(installRoot); err != nil {
-		return fmt.Errorf("remove existing install root: %w", err)
 	}
 
 	if err := os.MkdirAll(geosInstallDir, 0o755); err != nil {
@@ -132,6 +188,19 @@ func prepareInstallDirs(installRoot, geosInstallDir, baseboxDir string) error {
 	}
 
 	return nil
+}
+
+func confirmOverwrite() (bool, error) {
+	fmt.Print("Install root exists, are you really sure you want to overwrite it? [y/N]: ")
+
+	reader := bufio.NewReader(os.Stdin)
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		return false, fmt.Errorf("read confirmation: %w", err)
+	}
+
+	input = strings.TrimSpace(strings.ToLower(input))
+	return input == "y" || input == "yes", nil
 }
 
 func fatal(err error) {
