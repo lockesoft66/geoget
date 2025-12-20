@@ -183,7 +183,7 @@ func prepareInstallRoot(installRoot string, force bool) error {
 
 	if _, err := os.Stat(installRoot); err == nil {
 		if !force {
-			confirmed, confirmErr := confirmOverwrite()
+			confirmed, confirmErr := confirmOverwrite(installRoot)
 			if confirmErr != nil {
 				return confirmErr
 			}
@@ -218,8 +218,8 @@ func prepareInstallDirs(installRoot, geosInstallDir, baseboxDir string) error {
 	return nil
 }
 
-func confirmOverwrite() (bool, error) {
-	fmt.Print("Install root exists, are you really sure you want to overwrite it? [y/N]: ")
+func confirmOverwrite(installRoot string) (bool, error) {
+	fmt.Printf("Install root '%s' exists, are you really sure you want to overwrite it? [y/n]: ", installRoot)
 
 	reader := bufio.NewReader(os.Stdin)
 	input, err := reader.ReadString('\n')
