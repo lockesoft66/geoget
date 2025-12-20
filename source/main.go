@@ -173,7 +173,7 @@ func printUsage() {
 	fmt.Fprintln(flag.CommandLine.Output(), "  install_root  optional install root; defaults to geospc (absolute roots cleaned, relative roots resolved under home)")
 	fmt.Fprintln(flag.CommandLine.Output())
 	fmt.Fprintln(flag.CommandLine.Output(), "Defaults:")
-	fmt.Fprintln(flag.CommandLine.Output(), "  If no issue flags are provided, the default tags are used (edit defaultGeosReleaseTag/defaultBaseboxReleaseTag to change).")
+	fmt.Fprintln(flag.CommandLine.Output(), "  If no issue flags are provided, CI-latest is used.")
 }
 
 func prepareInstallRoot(installRoot string, force bool) error {
