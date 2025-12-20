@@ -170,7 +170,7 @@ func printUsage() {
 	fmt.Fprintln(flag.CommandLine.Output(), "  -h, --help             show this help message")
 	fmt.Fprintln(flag.CommandLine.Output())
 	fmt.Fprintln(flag.CommandLine.Output(), "Arguments:")
-	fmt.Fprintln(flag.CommandLine.Output(), "  install_root  optional install root; defaults to geospc (absolute roots cleaned, relative roots resolved under home)")
+	fmt.Fprintln(flag.CommandLine.Output(), "  install_root           optional install root; defaults to \"geospc\" under home)")
 	fmt.Fprintln(flag.CommandLine.Output())
 	fmt.Fprintln(flag.CommandLine.Output(), "Defaults:")
 	fmt.Fprintln(flag.CommandLine.Output(), "  If no issue flags are provided, CI-latest is used.")
