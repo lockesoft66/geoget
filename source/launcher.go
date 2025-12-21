@@ -30,23 +30,17 @@ var (
 )
 
 func createLaunchers(installRoot, arch string) error {
-	templDir, err := templateDir()
-	if err != nil {
-		return err
-	}
-
 	launchers, err := launcherTemplatesForArch(arch)
 	if err != nil {
 		return err
 	}
 
 	for _, launcher := range launchers {
-		source := filepath.Join(templDir, launcher.templateName)
 		dest := filepath.Join(installRoot, launcher.outputName)
 
-		content, err := os.ReadFile(source)
+		content, err := templateFS.ReadFile("templ/" + launcher.templateName)
 		if err != nil {
-			return fmt.Errorf("read launcher template %s: %w", source, err)
+			return fmt.Errorf("read launcher template %s: %w", launcher.templateName, err)
 		}
 
 		if err := os.WriteFile(dest, content, 0o755); err != nil {
@@ -87,13 +81,7 @@ func launcherTemplatesForArch(arch string) ([]launcherTemplate, error) {
 }
 
 func writeBaseboxConfig(baseboxDir, drivecDir string) error {
-	templDir, err := templateDir()
-	if err != nil {
-		return err
-	}
-
-	templatePath := filepath.Join(templDir, "basebox.conf")
-	data, err := os.ReadFile(templatePath)
+	data, err := templateFS.ReadFile("templ/basebox.conf")
 	if err != nil {
 		return fmt.Errorf("read basebox template: %w", err)
 	}
@@ -186,26 +174,4 @@ func binaryPathForArch(baseboxDir, arch string) (string, bool) {
 		return relPath, true
 	}
 	return "", false
-}
-
-func templateDir() (string, error) {
-	exe, err := os.Executable()
-	if err != nil {
-		return "", fmt.Errorf("locate executable: %w", err)
-	}
-	exeDir := filepath.Dir(exe)
-
-	candidates := []string{
-		filepath.Join(exeDir, "templ"),                 // old layout (optional fallback)
-		filepath.Join(exeDir, "source", "templ"),       // source/templ under repo root
-		filepath.Join(exeDir, "..", "source", "templ"), // fallback if binary ends up in a subdir
-	}
-
-	for _, dir := range candidates {
-		if info, err := os.Stat(dir); err == nil && info.IsDir() {
-			return dir, nil
-		}
-	}
-
-	return "", fmt.Errorf("unable to locate templ directory (checked %v)", candidates)
 }
