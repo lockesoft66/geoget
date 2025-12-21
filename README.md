@@ -2,13 +2,13 @@ Geoget is a tool which gives you an easy way to test the actual pre-release of P
 
 CAUTION: data you create with PC/GEOS Ensemble won't be preserved on an update, this is for testing / debbugging purposes only.
 
-### How to use
-
-```
 The easiest way to use it is to just launch geoget, e.g. geoget-linux or geoget-win64.exe from Explorer. After doing so you will find a folder called "geospc" in your home folder. You can start the launcher "ensemble.cmd" in the newly created directory.
 
 If you want more, the advanced usage looks like this:
 
+### How to use
+
+```
 geoget [options] [install_root]
 
 Options:
