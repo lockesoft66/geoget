@@ -81,13 +81,24 @@ func launcherTemplatesForArch(arch string) ([]launcherTemplate, error) {
 }
 
 func writeBaseboxConfig(baseboxDir, drivecDir string) error {
+
+	var loaderDir string
+	var config string
+
 	data, err := templateFS.ReadFile("templ/basebox.conf")
 	if err != nil {
 		return fmt.Errorf("read basebox template: %w", err)
 	}
 
+	config = string(data);
+
+	loaderDir, err = resolveGeosLoaderDir(drivecDir)
+	if err == nil {
+		config = strings.ReplaceAll(config, "{{LOADER_DIR}}", loaderDir)
+	}
+
 	hostPath := filepath.Clean(drivecDir)
-	config := strings.ReplaceAll(string(data), "{{TAG}}", hostPath)
+	config = strings.ReplaceAll(config, "{{HOST_PATH}}", hostPath)
 
 	dest := filepath.Join(baseboxDir, "basebox.conf")
 	if err := os.WriteFile(dest, []byte(config), 0o644); err != nil {
